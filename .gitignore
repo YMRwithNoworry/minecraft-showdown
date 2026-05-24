@@ -1,0 +1,34 @@
+# Compiled class files
+*.class
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# Forge
+run/
+logs/
+libs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude / Codex
+.claude/
+# Misc
+杂物/
