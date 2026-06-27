@@ -148,7 +148,7 @@ public class ModCommand {
         ServerLevel serverLevel = (ServerLevel) source.getLevel();
         for (Entity entity : serverLevel.getAllEntities()) {
             if (entity instanceof Mob mob && ModFeudManager.belongsToAny(mob.getType())) {
-                mob.targetSelector.addGoal(0, new ModFeudTargetGoal(mob));
+                Showdown.ensureFeudTargetGoal(mob);
                 mob.setTarget(null);
             }
         }
@@ -279,7 +279,7 @@ public class ModCommand {
         ServerLevel serverLevel = (ServerLevel) source.getLevel();
         for (Entity entity : serverLevel.getAllEntities()) {
             if (entity instanceof Mob mob && ModFeudManager.belongsToTeam(mob.getType())) {
-                mob.targetSelector.addGoal(0, new ModFeudTargetGoal(mob));
+                Showdown.ensureFeudTargetGoal(mob);
                 mob.setTarget(null);
             }
         }

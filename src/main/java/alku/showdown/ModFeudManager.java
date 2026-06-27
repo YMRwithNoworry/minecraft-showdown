@@ -71,11 +71,29 @@ public class ModFeudManager {
         return entityToTeam.get(type);
     }
 
+    public static boolean areHostile(EntityType<?> attackerType, EntityType<?> targetType) {
+        if (!active) return false;
+        String attackerTeam = entityToTeam.get(attackerType);
+        String targetTeam = entityToTeam.get(targetType);
+        return attackerTeam != null && targetTeam != null && !attackerTeam.equals(targetTeam);
+    }
+
+    public static boolean areSameTeam(EntityType<?> firstType, EntityType<?> secondType) {
+        String firstTeam = entityToTeam.get(firstType);
+        String secondTeam = entityToTeam.get(secondType);
+        return firstTeam != null && firstTeam.equals(secondTeam);
+    }
+
+    public static boolean hasHostileEntities(EntityType<?> type) {
+        return active && !getHostileEntities(type).isEmpty();
+    }
+
     /**
      * Returns the pre-computed hostile entity set for a given entity type.
      * Uses per-team caching: all entities in the same team share one hostile set.
      */
     public static Set<EntityType<?>> getHostileEntities(EntityType<?> type) {
+        if (!active) return Collections.emptySet();
         String myTeam = entityToTeam.get(type);
         if (myTeam == null) return Collections.emptySet();
         return teamHostileCache.computeIfAbsent(myTeam, team -> {

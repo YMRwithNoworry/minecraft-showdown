@@ -5,6 +5,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
@@ -79,6 +80,12 @@ public class Showdown {
     // WeakHashMap allows GC to reclaim mobs; no synchronization needed (server thread only)
     private static final Set<Mob> mobsWithGoal = Collections.newSetFromMap(new WeakHashMap<>());
 
+    public static void ensureFeudTargetGoal(Mob mob) {
+        if (mobsWithGoal.add(mob)) {
+            mob.targetSelector.addGoal(0, new ModFeudTargetGoal(mob));
+        }
+    }
+
     public Showdown() {
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
         modEventBus.addListener(this::commonSetup);
@@ -127,18 +134,26 @@ public class Showdown {
 
         // Feud goal injection - check isActive() before instanceof to short-circuit early
         if (ModFeudManager.isActive() && entity instanceof Mob mob) {
-            if (ModFeudManager.belongsToAny(mob.getType()) && mobsWithGoal.add(mob)) {
-                mob.targetSelector.addGoal(0, new ModFeudTargetGoal(mob));
+            if (ModFeudManager.belongsToAny(mob.getType())) {
+                ensureFeudTargetGoal(mob);
             }
         }
     }
 
     @SubscribeEvent
     public void onLivingChangeTarget(LivingChangeTargetEvent event) {
+        LivingEntity newTarget = event.getNewTarget();
+        if (event.getEntity() instanceof Mob mob && newTarget != null
+            && ModFeudManager.areSameTeam(mob.getType(), newTarget.getType())) {
+            event.setNewTarget(null);
+            return;
+        }
+
         if (clearingTarget || !peacefulMode) return;
 
         if (event.getNewTarget() instanceof Player && event.getEntity() instanceof Mob mob) {
             clearingTarget = true;
+            event.setNewTarget(null);
             mob.setTarget(null);
             clearingTarget = false;
         }
@@ -146,6 +161,12 @@ public class Showdown {
 
     @SubscribeEvent
     public void onLivingHurt(LivingHurtEvent event) {
+        if (event.getEntity() instanceof Mob victim && event.getSource().getEntity() instanceof Mob attacker
+            && ModFeudManager.areSameTeam(attacker.getType(), victim.getType())) {
+            event.setCanceled(true);
+            return;
+        }
+
         if (godMode && event.getEntity() instanceof Player) {
             event.setCanceled(true);
         }
