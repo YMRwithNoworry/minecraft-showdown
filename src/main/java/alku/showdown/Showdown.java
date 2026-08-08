@@ -3,12 +3,15 @@ package alku.showdown;
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.effect.MobEffectCategory;
+import net.minecraft.world.entity.AreaEffectCloud;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTab;
@@ -161,7 +164,9 @@ public class Showdown {
 
     @SubscribeEvent
     public void onLivingHurt(LivingHurtEvent event) {
-        if (event.getEntity() instanceof Mob victim && event.getSource().getEntity() instanceof Mob attacker
+        LivingEntity victim = event.getEntity();
+        LivingEntity attacker = getResponsibleLivingEntity(event.getSource().getEntity());
+        if (attacker != null && attacker != victim
             && ModFeudManager.areSameTeam(attacker.getType(), victim.getType())) {
             event.setCanceled(true);
             return;
@@ -173,10 +178,41 @@ public class Showdown {
     }
 
     @SubscribeEvent
-    public void onPotionAdded(MobEffectEvent.Added event) {
+    public void onMobEffectApplicable(MobEffectEvent.Applicable event) {
         if (godMode && event.getEntity() instanceof Player) {
             event.setResult(Event.Result.DENY);
         }
+    }
+
+    @SubscribeEvent
+    public void onMobEffectAdded(MobEffectEvent.Added event) {
+        if (event.getEffectInstance().getEffect().getCategory() != MobEffectCategory.HARMFUL) {
+            return;
+        }
+
+        LivingEntity victim = event.getEntity();
+        LivingEntity source = getResponsibleLivingEntity(event.getEffectSource());
+        if (source != null && source != victim
+            && ModFeudManager.areSameTeam(source.getType(), victim.getType())) {
+            // Forge exposes the source only after insertion, so undo it and preserve any replaced effect.
+            victim.removeEffect(event.getEffectInstance().getEffect());
+            if (event.getOldEffectInstance() != null) {
+                victim.addEffect(event.getOldEffectInstance());
+            }
+        }
+    }
+
+    private static LivingEntity getResponsibleLivingEntity(Entity source) {
+        if (source instanceof LivingEntity livingEntity) {
+            return livingEntity;
+        }
+        if (source instanceof Projectile projectile && projectile.getOwner() instanceof LivingEntity owner) {
+            return owner;
+        }
+        if (source instanceof AreaEffectCloud cloud && cloud.getOwner() != null) {
+            return cloud.getOwner();
+        }
+        return null;
     }
 
     @SubscribeEvent
@@ -199,6 +235,8 @@ public class Showdown {
 
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event) {
+        ModTeamManager.load();
+        ModFeudManager.applyTeams();
         LOGGER.info("Showdown mod loaded - Features: noItemDrops={}, noExpDrops={}, peacefulMode={}, godMode={}",
             noItemDrops, noExpDrops, peacefulMode, godMode);
     }

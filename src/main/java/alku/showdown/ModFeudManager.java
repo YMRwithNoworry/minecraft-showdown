@@ -37,15 +37,15 @@ public class ModFeudManager {
             for (String modId : mods) {
                 entities.addAll(scanEntitiesForMod(modId));
             }
+            if (entities.isEmpty()) continue;
+
             teamEntities.put(teamName, entities);
             for (EntityType<?> type : entities) {
                 entityToTeam.put(type, teamName);
             }
         }
 
-        if (!teamEntities.isEmpty()) {
-            active = true;
-        }
+        active = teamEntities.size() >= 2;
     }
 
     public static void stop() {
@@ -69,6 +69,10 @@ public class ModFeudManager {
 
     public static String getTeamOfEntity(EntityType<?> type) {
         return entityToTeam.get(type);
+    }
+
+    public static Set<EntityType<?>> getAssignedEntityTypes() {
+        return Set.copyOf(entityToTeam.keySet());
     }
 
     public static boolean areHostile(EntityType<?> attackerType, EntityType<?> targetType) {

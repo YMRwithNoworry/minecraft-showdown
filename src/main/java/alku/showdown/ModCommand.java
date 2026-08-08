@@ -9,8 +9,9 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
-import net.minecraftforge.fml.ModList;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
 import java.util.Map;
@@ -19,14 +20,17 @@ import java.util.stream.Collectors;
 
 public class ModCommand {
 
-    // Cached mod ID list - rebuilt only when suggestions are requested
+    private static final int ADMIN_PERMISSION_LEVEL = 2;
+
+    // Entity registries are stable by the time server commands are registered.
     private static List<String> cachedModIds = null;
 
     private static List<String> getModIds() {
         if (cachedModIds == null) {
-            cachedModIds = ModList.get().getMods().stream()
-                .map(info -> info.getModId())
-                .filter(id -> !id.equals("minecraft") && !id.equals("forge"))
+            cachedModIds = ForgeRegistries.ENTITY_TYPES.getKeys().stream()
+                .map(key -> key.getNamespace())
+                .distinct()
+                .sorted()
                 .collect(Collectors.toList());
         }
         return cachedModIds;
@@ -52,8 +56,8 @@ public class ModCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(
             Commands.literal("showdown")
-                .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("hostile")
+                    .requires(source -> source.hasPermission(ADMIN_PERMISSION_LEVEL))
                     .then(Commands.argument("mod1", StringArgumentType.word())
                         .suggests(MOD_ID_SUGGESTIONS)
                         .then(Commands.argument("mod2", StringArgumentType.word())
@@ -67,21 +71,27 @@ public class ModCommand {
                     )
                 )
                 .then(Commands.literal("cancel")
+                    .requires(source -> source.hasPermission(ADMIN_PERMISSION_LEVEL))
                     .executes(ctx -> cancelFeud(ctx.getSource()))
                 )
                 .then(Commands.literal("nodrops")
+                    .requires(source -> source.hasPermission(ADMIN_PERMISSION_LEVEL))
                     .executes(ctx -> toggleNoDrops(ctx.getSource()))
                 )
                 .then(Commands.literal("noexps")
+                    .requires(source -> source.hasPermission(ADMIN_PERMISSION_LEVEL))
                     .executes(ctx -> toggleNoExpDrops(ctx.getSource()))
                 )
                 .then(Commands.literal("peaceful")
+                    .requires(source -> source.hasPermission(ADMIN_PERMISSION_LEVEL))
                     .executes(ctx -> togglePeaceful(ctx.getSource()))
                 )
                 .then(Commands.literal("godmode")
+                    .requires(source -> source.hasPermission(ADMIN_PERMISSION_LEVEL))
                     .executes(ctx -> toggleGodMode(ctx.getSource()))
                 )
                 .then(Commands.literal("record")
+                    .requires(source -> source.hasPermission(ADMIN_PERMISSION_LEVEL))
                     .executes(ctx -> toggleRecord(ctx.getSource()))
                 )
                 .then(Commands.literal("team")
@@ -209,7 +219,8 @@ public class ModCommand {
 
     private static int createTeam(CommandSourceStack source, String teamName) {
         if (ModTeamManager.createTeam(teamName)) {
-            source.sendSuccess(() -> Component.literal("已创建队伍: §a" + teamName), true);
+            refreshTeamFeud(source);
+            source.sendSuccess(() -> Component.literal("已创建队伍并更新敌对关系: §a" + teamName), true);
             return 1;
         } else {
             source.sendFailure(Component.literal("队伍 §c" + teamName + "§r 已存在"));
@@ -223,7 +234,8 @@ public class ModCommand {
             return 0;
         }
         ModTeamManager.deleteTeam(teamName);
-        source.sendSuccess(() -> Component.literal("已删除队伍: §c" + teamName), true);
+        refreshTeamFeud(source);
+        source.sendSuccess(() -> Component.literal("已删除队伍并更新敌对关系: §c" + teamName), true);
         return 1;
     }
 
@@ -232,13 +244,20 @@ public class ModCommand {
             source.sendFailure(Component.literal("队伍 §c" + teamName + "§r 不存在"));
             return 0;
         }
+        if (!getModIds().contains(modId)) {
+            source.sendFailure(Component.literal("未找到包含生物实体的模组: §c" + modId));
+            return 0;
+        }
         if (ModTeamManager.isModInAnyTeam(modId)) {
             String currentTeam = ModTeamManager.getTeamOfMod(modId);
             source.sendFailure(Component.literal("模组 §c" + modId + "§r 已在队伍 §e" + currentTeam + "§r 中"));
             return 0;
         }
         ModTeamManager.addModToTeam(teamName, modId);
-        source.sendSuccess(() -> Component.literal("已将 §a" + modId + "§r 添加到队伍 §e" + teamName), true);
+        refreshTeamFeud(source);
+        source.sendSuccess(() -> Component.literal(
+            "已将 §a" + modId + "§r 添加到队伍 §e" + teamName + "§r，并更新敌对关系"
+        ), true);
         return 1;
     }
 
@@ -249,7 +268,10 @@ public class ModCommand {
         }
         String teamName = ModTeamManager.getTeamOfMod(modId);
         ModTeamManager.removeModFromTeam(modId);
-        source.sendSuccess(() -> Component.literal("已将 §c" + modId + "§r 从队伍 §e" + teamName + "§r 移除"), true);
+        refreshTeamFeud(source);
+        source.sendSuccess(() -> Component.literal(
+            "已将 §c" + modId + "§r 从队伍 §e" + teamName + "§r 移除，并更新敌对关系"
+        ), true);
         return 1;
     }
 
@@ -274,18 +296,32 @@ public class ModCommand {
     }
 
     private static int applyTeams(CommandSourceStack source) {
+        refreshTeamFeud(source);
+        if (ModFeudManager.isActive()) {
+            source.sendSuccess(() -> Component.literal("§a已应用队伍设置，不同队伍的生物将互相攻击"), true);
+        } else {
+            source.sendSuccess(() -> Component.literal("§e已应用队伍设置；至少需要两个包含生物的队伍才能开始敌对"), true);
+        }
+        return 1;
+    }
+
+    private static void refreshTeamFeud(CommandSourceStack source) {
+        Set<EntityType<?>> previousTypes = ModFeudManager.getAssignedEntityTypes();
         ModFeudManager.applyTeams();
 
-        ServerLevel serverLevel = (ServerLevel) source.getLevel();
+        ServerLevel serverLevel = source.getLevel();
         for (Entity entity : serverLevel.getAllEntities()) {
-            if (entity instanceof Mob mob && ModFeudManager.belongsToTeam(mob.getType())) {
-                Showdown.ensureFeudTargetGoal(mob);
+            if (!(entity instanceof Mob mob)) continue;
+
+            boolean assignedBefore = previousTypes.contains(mob.getType());
+            boolean assignedNow = ModFeudManager.belongsToTeam(mob.getType());
+            if (assignedBefore || assignedNow) {
                 mob.setTarget(null);
             }
+            if (assignedNow) {
+                Showdown.ensureFeudTargetGoal(mob);
+            }
         }
-
-        source.sendSuccess(() -> Component.literal("§a已应用队伍敌对设置，不同队伍的生物将互相攻击"), true);
-        return 1;
     }
 
     private static int clearTeams(CommandSourceStack source) {
